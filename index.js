@@ -4,15 +4,30 @@ const cors = require("cors");
 
 const app = express();
 
-// CORS configuration for production
+// CORS configuration - Updated with your actual domains
 const corsOptions = {
-  origin: process.env.NODE_ENV === 'production'
-    ? ['https://your-frontend-domain.com', 'https://hollister-inn-backend.onrender.com'] // Replace with your actual frontend URL
-    : ['http://localhost:3000', 'http://localhost:3001'],
-  credentials: true
+  origin: [
+    // Development
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'http://localhost:5173', // Vite
+    // Production - Your actual domains
+    'https://hollisterinn-feedback.vercel.app',
+    'https://hollisterinn-dashboard.vercel.app'
+  ],
+  credentials: true,
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
 };
 
 app.use(cors(corsOptions));
+
+// Debug middleware to see incoming origins
+app.use((req, res, next) => {
+  console.log('🌐 Request from origin:', req.headers.origin);
+  next();
+});
+
 app.use(express.json({ limit: '10mb' }));
 
 // MongoDB Connection with better error handling
@@ -267,5 +282,5 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`📊 Health check: https://hollister-inn-backend.onrender.com//health`);
+  console.log(`📊 Health check: https://hollister-inn-backend.onrender.com/health`);
 });
