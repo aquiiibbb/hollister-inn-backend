@@ -2,10 +2,10 @@
   "name": "hotel-feedback-api",
   "version": "1.0.0",
   "description": "Hotel feedback management API",
-  "main": "server.js",
+  "main": "index.js",
   "scripts": {
-    "start": "node server.js",
-    "dev": "nodemon server.js",
+    "start": "node index.js",
+    "dev": "nodemon index.js",
     "test": "echo \"No tests specified\" && exit 0"
   },
   "engines": {
@@ -26,6 +26,6 @@
     "express",
     "mongodb"
   ],
-  "author": "Hollister Inn",
+  "author": "Your Name",
   "license": "MIT"
 }
