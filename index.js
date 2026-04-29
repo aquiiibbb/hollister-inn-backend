@@ -3,29 +3,75 @@ const mongoose = require("mongoose");
 const cors = require("cors");
 
 const app = express();
-app.use(cors());
-app.use(express.json());
 
-// MongoDB Connection
-mongoose.connect("mongodb+srv://aquib:aquib123@aquib.je4kszd.mongodb.net/hotel_db?appName=munday", {
-  useNewUrlParser: true,
-  useUnifiedTopology: true,
-}).then(() => console.log("✅ MongoDB connected"))
-  .catch(err => console.error("❌ MongoDB error:", err));
+// CORS configuration for production
+const corsOptions = {
+  origin: process.env.NODE_ENV === 'production'
+    ? ['https://your-frontend-domain.com'] // Replace with your actual frontend URL
+    : ['http://localhost:3000', 'http://localhost:3001'],
+  credentials: true
+};
 
-// Updated Schema with user details
+app.use(cors(corsOptions));
+app.use(express.json({ limit: '10mb' }));
+
+// MongoDB Connection with better error handling
+const connectDB = async () => {
+  try {
+    await mongoose.connect(process.env.MONGODB_URI || "mongodb+srv://aquib:aquib123@aquib.je4kszd.mongodb.net/hotel_db?appName=munday", {
+      useNewUrlParser: true,
+      useUnifiedTopology: true,
+    });
+    console.log("✅ MongoDB connected successfully");
+  } catch (error) {
+    console.error("❌ MongoDB connection failed:", error);
+    process.exit(1);
+  }
+};
+
+connectDB();
+
+// Handle MongoDB connection events
+mongoose.connection.on('disconnected', () => {
+  console.log('❌ MongoDB disconnected');
+});
+
+mongoose.connection.on('reconnected', () => {
+  console.log('✅ MongoDB reconnected');
+});
+
+// Updated Schema
 const FeedbackSchema = new mongoose.Schema({
-  name: { type: String, required: true },
-  email: { type: String, required: true },
-  phone: { type: String, required: true },
-  rating: { type: Number, required: true },
-  message: { type: String, required: true },
+  name: { type: String, required: true, trim: true },
+  email: { type: String, required: true, trim: true, lowercase: true },
+  phone: { type: String, required: true, trim: true },
+  rating: { type: Number, required: true, min: 1, max: 5 },
+  message: { type: String, trim: true, default: "No message provided" },
   date: { type: Date, default: Date.now }
+}, {
+  timestamps: true // Adds createdAt and updatedAt
 });
 
 const Feedback = mongoose.model("Feedback", FeedbackSchema);
 
-// POST - Save Feedback with user details
+// Root endpoint
+app.get("/", (req, res) => {
+  res.json({
+    success: true,
+    message: "Hotel Feedback API is running",
+    version: "1.0.0",
+    endpoints: {
+      health: "/health",
+      feedback: {
+        get: "GET /feedback",
+        post: "POST /feedback",
+        delete: "DELETE /feedback/:id"
+      }
+    }
+  });
+});
+
+// POST - Save Feedback
 app.post("/feedback", async (req, res) => {
   try {
     console.log("📥 Received feedback data:", JSON.stringify(req.body, null, 2));
@@ -35,11 +81,10 @@ app.post("/feedback", async (req, res) => {
     // Validation
     if (!name || !email || !phone || !rating) {
       console.log("❌ Validation failed - missing fields");
-      console.log("Received:", { name, email, phone, rating });
       return res.status(400).json({
         success: false,
-        error: "All fields are required",
-        received: { name, email, phone, rating }
+        error: "Name, email, phone, and rating are required",
+        received: { name: !!name, email: !!email, phone: !!phone, rating: !!rating }
       });
     }
 
@@ -53,12 +98,21 @@ app.post("/feedback", async (req, res) => {
       });
     }
 
-    // Create feedback entry with explicit field mapping
+    // Rating validation
+    const ratingNum = Number(rating);
+    if (isNaN(ratingNum) || ratingNum < 1 || ratingNum > 5) {
+      return res.status(400).json({
+        success: false,
+        error: "Rating must be a number between 1 and 5"
+      });
+    }
+
+    // Create feedback entry
     const feedbackData = {
       name: String(name).trim(),
-      email: String(email).trim(),
+      email: String(email).trim().toLowerCase(),
       phone: String(phone).trim(),
-      rating: Number(rating),
+      rating: ratingNum,
       message: message ? String(message).trim() : "No message provided"
     };
 
@@ -66,53 +120,70 @@ app.post("/feedback", async (req, res) => {
 
     const feedback = await Feedback.create(feedbackData);
 
-    console.log("✅ Feedback saved successfully:", {
-      id: feedback._id,
-      name: feedback.name,
-      email: feedback.email,
-      phone: feedback.phone,
-      rating: feedback.rating,
-      message: feedback.message
-    });
+    console.log("✅ Feedback saved successfully:", feedback._id);
 
-    res.json({
+    res.status(201).json({
       success: true,
       message: "Feedback saved successfully",
       id: feedback._id,
-      data: feedback
+      data: {
+        name: feedback.name,
+        email: feedback.email,
+        phone: feedback.phone,
+        rating: feedback.rating,
+        message: feedback.message,
+        date: feedback.date
+      }
     });
 
   } catch (err) {
     console.error("❌ Error saving feedback:", err);
+
+    // Handle duplicate key errors
+    if (err.code === 11000) {
+      return res.status(400).json({
+        success: false,
+        error: "Duplicate entry detected"
+      });
+    }
+
     res.status(500).json({
       success: false,
-      error: "Server error: " + err.message
+      error: "Internal server error"
     });
   }
 });
 
-// GET - Get All Feedback with user details
+// GET - Get All Feedback
 app.get("/feedback", async (req, res) => {
   try {
-    const data = await Feedback.find().sort({ date: -1 });
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const skip = (page - 1) * limit;
 
-    console.log(`📊 Retrieved ${data.length} feedback entries`);
+    const data = await Feedback.find()
+      .sort({ date: -1 })
+      .skip(skip)
+      .limit(limit)
+      .select('-__v'); // Exclude version field
 
-    // Log first entry for debugging
-    if (data.length > 0) {
-      console.log("Sample entry:", JSON.stringify(data[0], null, 2));
-    }
+    const total = await Feedback.countDocuments();
+
+    console.log(`📊 Retrieved ${data.length} feedback entries (page ${page})`);
 
     res.json({
       success: true,
       count: data.length,
+      total: total,
+      page: page,
+      totalPages: Math.ceil(total / limit),
       data: data
     });
   } catch (err) {
     console.error("❌ Error fetching feedback:", err);
     res.status(500).json({
       success: false,
-      error: "Server error: " + err.message
+      error: "Failed to fetch feedback"
     });
   }
 });
@@ -121,6 +192,14 @@ app.get("/feedback", async (req, res) => {
 app.delete("/feedback/:id", async (req, res) => {
   try {
     const { id } = req.params;
+
+    if (!mongoose.Types.ObjectId.isValid(id)) {
+      return res.status(400).json({
+        success: false,
+        error: "Invalid feedback ID"
+      });
+    }
+
     console.log("🗑️ Deleting feedback with ID:", id);
 
     const deleted = await Feedback.findByIdAndDelete(id);
@@ -135,13 +214,14 @@ app.delete("/feedback/:id", async (req, res) => {
     console.log("✅ Feedback deleted successfully");
     res.json({
       success: true,
-      message: "Feedback deleted successfully"
+      message: "Feedback deleted successfully",
+      deletedId: id
     });
   } catch (err) {
     console.error("❌ Delete error:", err);
     res.status(500).json({
       success: false,
-      error: err.message
+      error: "Failed to delete feedback"
     });
   }
 });
@@ -150,13 +230,42 @@ app.delete("/feedback/:id", async (req, res) => {
 app.get("/health", (req, res) => {
   res.json({
     success: true,
-    message: "Server is running",
-    timestamp: new Date().toISOString()
+    message: "Server is healthy",
+    timestamp: new Date().toISOString(),
+    uptime: process.uptime(),
+    environment: process.env.NODE_ENV || 'development',
+    mongodb: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected'
   });
 });
 
+// 404 handler
+app.use('*', (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: "Endpoint not found",
+    availableEndpoints: ["/", "/health", "/feedback"]
+  });
+});
+
+// Error handling middleware
+app.use((err, req, res, next) => {
+  console.error("❌ Unhandled error:", err);
+  res.status(500).json({
+    success: false,
+    error: "Internal server error"
+  });
+});
+
+// Graceful shutdown
+process.on('SIGTERM', async () => {
+  console.log('SIGTERM received, shutting down gracefully');
+  await mongoose.connection.close();
+  process.exit(0);
+});
+
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-  console.log(`🚀 Server running on http://localhost:${PORT}`);
-  console.log(`📊 Dashboard: http://localhost:${PORT}/feedback`);
+app.listen(PORT, '0.0.0.0', () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
+  console.log(`📊 Health check: http://localhost:${PORT}/health`);
 });
