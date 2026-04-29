@@ -7,7 +7,7 @@ const app = express();
 // CORS configuration for production
 const corsOptions = {
   origin: process.env.NODE_ENV === 'production'
-    ? ['https://your-frontend-domain.com'] // Replace with your actual frontend URL
+    ? ['https://your-frontend-domain.com', 'https://hollister-inn-backend.onrender.com'] // Replace with your actual frontend URL
     : ['http://localhost:3000', 'http://localhost:3001'],
   credentials: true
 };
@@ -267,5 +267,5 @@ const PORT = process.env.PORT || 5000;
 app.listen(PORT, '0.0.0.0', () => {
   console.log(`🚀 Server running on port ${PORT}`);
   console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
-  console.log(`📊 Health check: http://localhost:${PORT}/health`);
+  console.log(`📊 Health check: https://hollister-inn-backend.onrender.com//health`);
 });
